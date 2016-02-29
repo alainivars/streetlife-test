@@ -1,0 +1,17 @@
+.idea
+.coverage
+.project
+.pydevproject
+*.py[co]
++__pycache__
+build
+dist/*
+.eggs/*
+*.egg-info
+*~
+.tox/*
+htmlcov/*
+coverage.xml
+*.egg
+*.egg/*
+.DS_Store
