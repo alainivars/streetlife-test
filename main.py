@@ -7,120 +7,66 @@
 # Copyright 2016 HIGHFEATURE All rights reserved
 # Licence: M.I.T
 #
-# PS: to reduce the execution time without big result changes, modify the
-# MAX_MOVE_CAT = 100000 to MAX_MOVE_CAT = 10000
-# Normally I write the tests first, but for first draw draft I don't write tests
-#
-# this is a point of view of an Architect... and here you can see how clear specifications
-# are vital to avoid misunderstand with the customer.
-# No assumptions, the true live :
-# - The Owner don't in real-time where is the cat
-# - Human and cat move in random order, that mean:
-#   - the cat can move beforre or after the human (3 times to check the meeting)
 
+"""
+This is a point of view of an Architect ... and here you can see how clear specifications are vitals to avoid
+misunderstand with the customer.
+An other important point: set random start positions in specification broke the repeatability of the validation
+Other points: "NEVER RE-INVENT THE WHELL" and "KEEP IT SIMPLE, STUPID"
+Last point on PEP8: I like all the recommendations in this PEP except one, the limit of 79 characters by line
+for me that an antediluvian thing when screen had only 80 characters by line, now in the 21st century, every editors
+even vi can display up to 120 characters by line and I use that, that make the code more readable, specialy when
+I see some lines cutted in 10 sub-lines with backslash at end, tha remind me some obscur codes in C or C++
+whi I had to debug. You can agree or not, you have the right, this is my opinion, of course when I work for a client
+I follow these coding rules and these can be very different from one to an other.
+I thing the version 3.0.0 will be a Django version because I LOVE that Framework and made the movements and show the
+result on google or GIS map will be very nice :)
+
+Assumptions :
+- we are in the 21st centuries and all cats are equipped with a tracking system
+- other thing not specified: when we comapare if human and cat are in same station;
+  before moves, after moves, after human move but before human move ???
+  I have decided to check it at every moment and, believe me that change a lot the result.
+"""
 import random
 import sys
 import getopt
 import json
+import networkx as nx
+
+from models import Human, Cat
 
 MAX_MOVE_CAT = 10000
 STATIONS_JSON_FILE = "tfl_stations.json"
 CONNECTIONS_JSON_FILE = "tfl_connections.json"
-# don't like global VM, but it's first draw
-# can be put in singleton for design pattern purist...
+
 # hummm, a question for design pattern purists: how many design pattern are used in this sample ?
 # give me they names and how many time they are used each ? after the good answer I will tell you
 # witch design pattern I use commonly at work and how
-stations = []
-connections = []
-
-
-class Entity:
-    """docstring for Entity
-
-    Attributes:
-        id: An integer representing the identifier of the entity.
-        current_station: An integer representing the identifier of the current station.
-    """
-    def __init__(self, id, current_station):
-        self.id = id
-        self.current_station = current_station
-        self.count_move = 0
-        self.can_move = True
-
-
-class Cat(Entity):
-    """docstring for Cat
-
-    Attributes:
-        id: An integer representing the identifier of the entity.
-        current_station: An integer representing the identifier of the current station.
-    """
-    def __init__(self, id, current_station):
-        super(Cat, self).__init__(id, current_station)
-
-    """docstring for calculate_move"""
-    def calculate_move(self):
-        self.count_move += 1
-        matches = (c for c in connections if c[0] == self.current_station and not stations[c[1]].closed)
-        if matches:
-            self.current_station = random.choice(matches)[1]
-        else:
-            # no path (ei. all destination station are closed)
-            self.can_move = False
-
-
-class Human(Entity):
-    """docstring for Human
-
-    Attributes:
-        id: An integer representing the identifier of the entity.
-        current_station: An integer representing the identifier of the current station.
-    """
-    def __init__(self, id, current_station):
-        super(Human, self).__init__(id, current_station)
-        self.last_station = current_station
-        self.found_cat = False
-
-    """docstring for calculate_move"""
-    def calculate_move(self):
-        self.count_move += 1
-        matches = [c for c in connections if c[0] == self.current_station and
-                   c[1] != self.last_station and not stations[c[1]].closed]
-        if not len(matches):
-            matches = [c for c in connections if c[0] == self.current_station and
-                       not stations[c[1]].closed]
-        if matches:
-            self.current_station = random.choice(matches)[1]
-        else:
-            # no path (ei. all destination station are closed)
-            self.can_move = False
-
-
-class Station:
-    """docstring for Station
-
-    Attributes:
-        id: An integer representing the identifier of the entity.
-        name: An string of the current station.
-    """
-    def __init__(self, id, name):
-        super(Station, self).__init__()
-        self.id = id
-        self.name = name
-        self.closed = False
 
 
 def usage():
     """command line help"""
     print("usage: ", sys.argv[0], "-h --help -c --count number")
-    
+
+
+def check_metting(human, cat, net):
+    if human.current_station == cat.current_station:
+        print("Owner {} found cat {} - {} is now closed.".format(
+              human.id, cat.id, net.node[human.current_station]['name']))
+        human.found_cat = True
+        human.can_move = False
+        cat.can_move = False
+        net.node[human.current_station]['closed'] = True
+        return 1
+    return 0
 
 if __name__ == "__main__":
 
     count = None
     humans = []
     cats = []
+    net = None
     found = 0
 
     """get datas from command line: just the count is important for us"""
@@ -135,64 +81,63 @@ if __name__ == "__main__":
         usage()
         exit(1)
 
-    # build an empty stations list of 1000 to direct access
-    for x in range(1000):
-        stations.append(Station(id=x, name=None))
-    # fill the list with station from json dile datas
+    # build the net
+    net = nx.Graph()
+
+    # build the net with station from json file datas
     with open(STATIONS_JSON_FILE) as data_file:
         stations_datas = json.load(data_file)
         for station in stations_datas:
-            stations[int(station[0])].id = int(station[0])
-            stations[int(station[0])].name = station[1]
+            net.add_node(int(station[0]), {'name': station[1], 'closed': False})
 
-    # build the list of connections from file json
+    # build the net of connections from file json
     with open(CONNECTIONS_JSON_FILE) as data_file:
         connections_datas = json.load(data_file)
         for connection in connections_datas:
-            connections.append([int(connection[0]), int(connection[1])])
-        # now build reverse conbination to simplfy move algorithm
-        for connection in connections_datas:
-            connections.append([int(connection[1]), int(connection[0])])
-        # not sure it's usefull but it's first draw and it better for debug
-        connections.sort()
+            net.add_edge(int(connection[0]), int(connection[1]))
 
     # create Humans and cats
     for i in range(count):
-        stations_existantes = [s for s in stations if s.name]
-        humans.append(Human(id=i, current_station=(random.choice(stations_existantes)).id))
-        cats.append(Human(id=i, current_station=(random.choice(stations_existantes)).id))
+        not_closed_stations = [s for s in net.nodes()]
+        human_current_station = random.choice(not_closed_stations)
+        humans.append(Human(id=i, current_station=human_current_station))
+        not_closed_stations.remove(human_current_station)
+        cats.append(Cat(id=i, current_station=(random.choice(not_closed_stations))))
 
-    # let's go (single thread, first draft)
-    for i in range(MAX_MOVE_CAT):
-        for human in humans:
-            if not human.found_cat and found != count:
-                if human.current_station == cats[human.id].current_station:
-                    print("Owner {} found cat {} - {} is now closed.".format(
-                          human.id, cats[human.id].id, stations[human.current_station].name))
-                    human.found_cat = True
-                    found += 1
-                    stations[human.current_station].closed = True
-                if human.can_move:
-                    human.calculate_move()
-                if cats[human.id].can_move:
-                    cats[human.id].calculate_move()
-
-    print("Total number of cats: ", count)
-    print("Number of cats found: ", found)
+    # let's go (single thread, second draft)
     sum_average = 0
     count_average = 0
     count_human_blocked = 0
     count_cat_blocked = 0
-    for human in humans:
-        if human.found_cat:
-            sum_average += human.count_move
-            count_average += 1
-        if not human.can_move:
-            count_human_blocked += 1
-        if not cats[human.id].can_move:
+    for i in range(MAX_MOVE_CAT):
+        for human in humans:
+            if not human.found_cat and found != count:
+                found += check_metting(human, cats[human.id], net)
+                if human.can_move:
+                    human.calculate_move(cats[human.id], net)
+                    found += check_metting(human, cats[human.id], net)
+                    # if human can't move that mind not path to cat,
+                    # in that case don't need move cat
+                    if cats[human.id].can_move:
+                        cats[human.id].calculate_move(net)
+                        found += check_metting(human, cats[human.id], net)
+                else:
+                    count_human_blocked += 1
+                    humans.remove(human)
+            else:
+                sum_average += human.count_move
+                count_average += 1
+                humans.remove(human)
+
+    print("Total number of cats: ", count)
+    print("Number of cats found: ", found)
+    for cat in cats:
+        if not cat.can_move:
             count_cat_blocked += 1
-    print("Average number of movements required to find a cat: ", int(sum_average/count_average))
-    print("Humans blocked at a station: ", count_human_blocked)
+    if count_average:
+        print("Average number of movements required to find a cat: ",
+              int(sum_average/count_average))
+    print("Humans without path to cat: ", count_human_blocked)
     print("Cats blocked at a station: ", count_cat_blocked)
 
     exit(0)
